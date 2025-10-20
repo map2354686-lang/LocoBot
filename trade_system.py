@@ -4,23 +4,41 @@ from discord.ext import commands
 import asyncio
 from datetime import datetime, timedelta
 
+
 # -----------------------------
 # 🔰 Widok finalizacji handlu (w prywatnym kanale)
 # -----------------------------
 class FinalizeTradeView(discord.ui.View):
-    def __init__(self, channel):
+    def __init__(self, channel, cog, author, partner):
         super().__init__(timeout=None)
         self.channel = channel
+        self.cog = cog
+        self.author = author
+        self.partner = partner
 
     @discord.ui.button(label="✅ Oferta udana", style=discord.ButtonStyle.green)
     async def success(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("🎉 Handel zakończony pomyślnie! Kanał zostanie usunięty za 5 sekund.", ephemeral=True)
+
+        # Powiadom kanał 📣│ogłoszenia
+        announce_channel = discord.utils.get(interaction.guild.text_channels, name="📣│ogłoszenia")
+        if announce_channel:
+            await announce_channel.send(
+                f"✅ Handel pomyślnie zakończony między {self.author.mention} a {self.partner.mention} 💎"
+            )
+
         await asyncio.sleep(5)
         await self.channel.delete()
 
     @discord.ui.button(label="❌ Anuluj handel", style=discord.ButtonStyle.red)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("❌ Handel anulowany. Kanał zostanie usunięty za 5 sekund.", ephemeral=True)
+        announce_channel = discord.utils.get(interaction.guild.text_channels, name="📣│ogłoszenia")
+        if announce_channel:
+            await announce_channel.send(
+                f"🚫 Handel między {self.author.mention} a {self.partner.mention} został anulowany."
+            )
+
         await asyncio.sleep(5)
         await self.channel.delete()
 
@@ -34,6 +52,7 @@ class TradeOfferView(discord.ui.View):
         self.cog = cog
         self.author = author
         self.active = True
+        self.current_trade_user = None  # aktualnie handlujący użytkownik
 
     @discord.ui.button(label="🟢 Zainteresowany", style=discord.ButtonStyle.green)
     async def interested(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -50,10 +69,12 @@ class TradeOfferView(discord.ui.View):
             await interaction.response.send_message("⚠️ Już handlujesz z tym graczem!", ephemeral=True)
             return
 
+        # Zablokuj inne kliknięcia
         self.cog.active_trades.add((self.author.id, interaction.user.id))
-        self.active = False  # blokujemy dalsze kliknięcia
+        self.active = False
+        self.current_trade_user = interaction.user
 
-        # 🏗️ Tworzenie prywatnego kanału
+        # 🏗️ Tworzenie prywatnego kanału handlu
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             self.author: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
@@ -69,9 +90,9 @@ class TradeOfferView(discord.ui.View):
                          f"Gdy zakończycie handel, wybierzcie jedną z opcji poniżej."),
             color=discord.Color.green()
         )
-        await trade_channel.send(embed=embed, view=FinalizeTradeView(trade_channel))
+        await trade_channel.send(embed=embed, view=FinalizeTradeView(trade_channel, self.cog, self.author, interaction.user))
 
-        # Aktualizacja wiadomości z ogłoszeniem
+        # Zaktualizuj ogłoszenie
         updated_embed = discord.Embed(
             title="🔒 Oferta w trakcie realizacji",
             description=f"Handel pomiędzy {self.author.mention} a {interaction.user.mention} jest w toku!",
@@ -100,40 +121,45 @@ class TradeOfferView(discord.ui.View):
 class TradeSystem(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.active_trades = set()  # uniknięcie podwójnych handli
+        self.active_trades = set()
 
-    @app_commands.command(name="trade", description="Rozpocznij wymianę z innym graczem.")
-    async def trade(self, interaction: discord.Interaction):
+    @app_commands.command(name="wystaw", description="Wystaw ofertę handlową na kanale 🧭│handel.")
+    async def wystaw(self, interaction: discord.Interaction):
         user = interaction.user
         trade_channel = discord.utils.get(interaction.guild.text_channels, name="🧭│handel")
         announce_channel = discord.utils.get(interaction.guild.text_channels, name="📣│ogłoszenia")
 
-        if not trade_channel:
-            await interaction.response.send_message("⚠️ Kanał `🧭│handel` nie istnieje!", ephemeral=True)
-            return
-        if not announce_channel:
-            await interaction.response.send_message("⚠️ Kanał `📣│ogłoszenia` nie istnieje!", ephemeral=True)
+        if not trade_channel or not announce_channel:
+            await interaction.response.send_message("⚠️ Brakuje jednego z kanałów: 🧭│handel lub 📣│ogłoszenia.", ephemeral=True)
             return
 
-        await interaction.response.send_message("🧾 Rozpoczynamy tworzenie ogłoszenia handlu!", ephemeral=True)
-
-        # 🔹 Krok 1 – co oferujesz
+        await interaction.response.send_message("🧾 Rozpoczynamy tworzenie twojej oferty handlu!", ephemeral=True)
         await user.send("💰 **Krok 1:** Napisz, co oferujesz:")
+
         def check(m): return m.author == user and isinstance(m.channel, discord.DMChannel)
         offer = await self.bot.wait_for("message", check=check)
         offer_text = offer.content
 
-        # 🔹 Krok 2 – co chcesz w zamian
         await user.send("🎯 **Krok 2:** Napisz, co chciałbyś otrzymać w zamian:")
         want = await self.bot.wait_for("message", check=check)
         want_text = want.content
 
-        # 🔹 Krok 3 – opis (opcjonalny)
-        await user.send("📝 **Krok 3:** (opcjonalnie) Napisz dodatkowy opis lub wpisz `pomiń`:")
+        await user.send("📝 **Krok 3:** (opcjonalnie) Opis oferty lub wpisz `pomiń`:")
         desc = await self.bot.wait_for("message", check=check)
         desc_text = None if desc.content.lower() == "pomiń" else desc.content
 
-        # 📦 Gotowy embed
+        await user.send("📸 **Krok 4:** Jeśli chcesz, wyślij zdjęcie przedmiotu (lub wpisz `pomiń`):")
+        attachment = None
+        try:
+            img = await self.bot.wait_for("message", check=check, timeout=60)
+            if img.attachments:
+                attachment = img.attachments[0].url
+            elif img.content.lower() == "pomiń":
+                attachment = None
+        except asyncio.TimeoutError:
+            attachment = None
+
+        # 📦 Tworzymy embed oferty
         embed = discord.Embed(
             title="📦 Nowe ogłoszenie handlowe",
             description=f"**👤 Gracz:** {user.mention}\n\n"
@@ -143,38 +169,39 @@ class TradeSystem(commands.Cog):
             color=discord.Color.gold(),
             timestamp=datetime.utcnow()
         )
-        embed.set_footer(text="Kliknij przycisk, aby rozpocząć handel z autorem ogłoszenia.")
+        embed.set_footer(text="Kliknij przycisk, aby rozpocząć handel z autorem.")
+        if attachment:
+            embed.set_image(url=attachment)
 
         view = TradeOfferView(self, user)
         message = await trade_channel.send(embed=embed, view=view)
 
-        # 📣 Ogłoszenie publiczne
+        # 📣 Ogłoszenie w kanale 📣│ogłoszenia
         announce_embed = discord.Embed(
             title="🛒 Nowa oferta handlowa!",
-            description=f"{user.mention} wystawił właśnie nową ofertę handlu! 💎\n\n"
-                        f"Sprawdź ją na kanale {trade_channel.mention}.",
+            description=f"{user.mention} wystawił nową ofertę handlu na kanale {trade_channel.mention}! 💎",
             color=discord.Color.blurple()
         )
         announce_embed.set_footer(text="Czas trwania oferty: 6 godzin ⏳")
         await announce_channel.send(embed=announce_embed)
 
-        await user.send("✅ Twoje ogłoszenie zostało opublikowane! Wygasa za 6 godzin ⏳")
+        await user.send("✅ Twoja oferta została opublikowana! Wygasa za 6 godzin ⏳")
 
-        # ⏳ Usunięcie po 6 godzinach, jeśli nikt nie kliknie
-        await asyncio.sleep(6 * 60 * 60)  # 6h
-        if view.active:  # nikt nie kliknął
+        # ⏳ Automatyczne wygaśnięcie po 6 godzinach
+        await asyncio.sleep(6 * 60 * 60)
+        if view.active:
             view.active = False
-            expired_embed = discord.Embed(
+            expired = discord.Embed(
                 title="⌛ Oferta wygasła",
-                description=f"Oferta gracza {user.mention} wygasła po 6 godzinach bez odpowiedzi.",
+                description=f"Oferta gracza {user.mention} wygasła po 6 godzinach bez zainteresowania.",
                 color=discord.Color.dark_grey()
             )
             try:
-                await message.edit(embed=expired_embed, view=None)
+                await message.edit(embed=expired, view=None)
             except:
                 pass
             try:
-                await user.send("⌛ Twoja oferta handlu wygasła po 6 godzinach bez odpowiedzi.")
+                await user.send("⌛ Twoja oferta wygasła bez odpowiedzi.")
             except:
                 pass
 
@@ -184,6 +211,7 @@ class TradeSystem(commands.Cog):
 # -----------------------------
 async def setup(bot):
     await bot.add_cog(TradeSystem(bot))
+
 
 
 
