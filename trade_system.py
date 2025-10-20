@@ -9,13 +9,14 @@ from datetime import datetime
 # 🔰 Widok finalizacji handlu (w prywatnym kanale)
 # -----------------------------
 class FinalizeTradeView(discord.ui.View):
-    def __init__(self, channel, cog, author, partner, announce_message):
+    def __init__(self, channel, cog, author, partner, announce_message, original_message):
         super().__init__(timeout=None)
         self.channel = channel
         self.cog = cog
         self.author = author
         self.partner = partner
         self.announce_message = announce_message
+        self.original_message = original_message  # 🧭│handel wiadomość z ofertą
 
     @discord.ui.button(label="✅ Oferta udana", style=discord.ButtonStyle.green)
     async def success(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -25,7 +26,7 @@ class FinalizeTradeView(discord.ui.View):
 
         await interaction.response.send_message("🎉 Handel zakończony pomyślnie! Kanał zostanie usunięty za 5 sekund.", ephemeral=True)
 
-        # ✅ Aktualizacja ogłoszenia
+        # ✅ Aktualizacja ogłoszenia w 📣│ogłoszenia
         success_embed = discord.Embed(
             title="✅ Oferta zakończona pomyślnie!",
             description=(
@@ -35,6 +36,12 @@ class FinalizeTradeView(discord.ui.View):
             timestamp=datetime.utcnow()
         )
         await self.announce_message.edit(embed=success_embed)
+
+        # 🧹 Usuń ogłoszenie z kanału 🧭│handel
+        try:
+            await self.original_message.delete()
+        except Exception as e:
+            print(f"[WARN] Nie udało się usunąć oferty z kanału 🧭│handel: {e}")
 
         # 📩 DM do autora
         try:
@@ -53,16 +60,17 @@ class FinalizeTradeView(discord.ui.View):
 
         await interaction.response.send_message("🚫 Handel został anulowany. Kanał zostanie usunięty za 5 sekund.", ephemeral=True)
 
-        # 🔁 Przywrócenie oferty jako aktywnej
-        for view in self.cog.active_offers:
-            if view.author == self.author:
-                view.active = True
-                break
-
+        # 🔄 Przywraca ofertę do stanu aktywnego w 🧭│handel
+        restored_embed = discord.Embed(
+            title="📦 Oferta ponownie aktywna",
+            description=f"{self.author.mention} ponownie wystawił swoją ofertę do handlu.",
+            color=discord.Color.gold(),
+            timestamp=datetime.utcnow()
+        )
         try:
-            await self.author.send("❌ Twój handel został anulowany. Twoja oferta jest ponownie aktywna.")
-        except:
-            pass
+            await self.original_message.edit(embed=restored_embed, view=TradeOfferView(self.cog, self.author))
+        except Exception as e:
+            print(f"[WARN] Nie udało się przywrócić oferty: {e}")
 
         await asyncio.sleep(5)
         await self.channel.delete()
@@ -164,25 +172,25 @@ class TradeSystem(commands.Cog):
         announce_channel = discord.utils.get(interaction.guild.text_channels, name="📣│ogłoszenia")
 
         if not trade_channel or not announce_channel:
-            await interaction.response.send_message("⚠️ Brakuje kanału `🧭│handel` lub `📣│ogłoszenia`.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Brakuje jednego z kanałów: 🧭│handel lub 📣│ogłoszenia.", ephemeral=True)
             return
 
-        await interaction.response.send_message("🧾 Rozpoczynamy tworzenie oferty!", ephemeral=True)
-        await user.send("💰 **Krok 1:** Co oferujesz?")
+        await interaction.response.send_message("🧾 Rozpoczynamy tworzenie twojej oferty handlu!", ephemeral=True)
+        await user.send("💰 **Krok 1:** Napisz, co oferujesz:")
 
         def check(m): return m.author == user and isinstance(m.channel, discord.DMChannel)
         offer = await self.bot.wait_for("message", check=check)
         offer_text = offer.content
 
-        await user.send("🎯 **Krok 2:** Co chciałbyś otrzymać w zamian?")
+        await user.send("🎯 **Krok 2:** Napisz, co chciałbyś otrzymać w zamian:")
         want = await self.bot.wait_for("message", check=check)
         want_text = want.content
 
-        await user.send("📝 **Krok 3:** Dodatkowy opis (lub napisz `pomiń`):")
+        await user.send("📝 **Krok 3:** (opcjonalnie) Opis oferty lub wpisz `pomiń`:")
         desc = await self.bot.wait_for("message", check=check)
         desc_text = None if desc.content.lower() == "pomiń" else desc.content
 
-        await user.send("📸 **Krok 4:** Wyślij zdjęcie przedmiotu (lub napisz `pomiń`):")
+        await user.send("📸 **Krok 4:** Jeśli chcesz, wyślij zdjęcie przedmiotu (lub wpisz `pomiń`):")
         attachment = None
         try:
             img = await self.bot.wait_for("message", check=check, timeout=60)
@@ -193,8 +201,8 @@ class TradeSystem(commands.Cog):
         except asyncio.TimeoutError:
             attachment = None
 
-        # 📦 Embed oferty
-        embed = discord.Embed(
+        # 📦 Tworzymy embed oferty
+        offer_embed = discord.Embed(
             title="📦 Nowe ogłoszenie handlowe",
             description=f"**👤 Gracz:** {user.mention}\n\n"
                         f"💰 **Oferuje:** {offer_text}\n"
@@ -203,39 +211,46 @@ class TradeSystem(commands.Cog):
             color=discord.Color.gold(),
             timestamp=datetime.utcnow()
         )
-        embed.set_footer(text="Kliknij przycisk, aby rozpocząć handel z autorem.")
+        offer_embed.set_footer(text="Kliknij przycisk, aby rozpocząć handel z autorem.")
         if attachment:
-            embed.set_image(url=attachment)
+            offer_embed.set_image(url=attachment)
 
-        # 📣 Ogłoszenie
+        # 📩 Wysyłamy ofertę do kanału 🧭│handel
+        view = TradeOfferView(self, user)
+        original_message = await trade_channel.send(embed=offer_embed, view=view)
+
+        # 📣 Wysyłamy ogłoszenie do 📣│ogłoszenia
         announce_embed = discord.Embed(
             title="🛒 Nowa oferta handlowa!",
-            description=f"{user.mention} wystawił nową ofertę na kanale {trade_channel.mention}! 💎",
+            description=f"{user.mention} wystawił nową ofertę handlu na kanale {trade_channel.mention}! 💎",
             color=discord.Color.blurple()
         )
         announce_embed.set_footer(text="Czas trwania oferty: 6 godzin ⏳")
         announce_message = await announce_channel.send(embed=announce_embed)
 
-        view = TradeOfferView(self, user, announce_message)
-        offer_message = await trade_channel.send(embed=embed, view=view)
-        self.active_offers.append(view)
+        # 🔗 Przypisz wiadomości do widoku (żeby można było aktualizować/usunąć później)
+        view.original_message = original_message
+        view.announce_message = announce_message
 
-        await user.send("✅ Twoja oferta została opublikowana i wygasa za 6 godzin ⏳")
+        await user.send("✅ Twoja oferta została opublikowana! Wygasa za 6 godzin ⏳")
 
-        # ⏳ Automatyczne wygaśnięcie
+        # ⏳ Automatyczne wygaśnięcie po 6 godzinach
         await asyncio.sleep(6 * 60 * 60)
         if view.active:
             view.active = False
+            expired = discord.Embed(
+                title="⌛ Oferta wygasła",
+                description=f"Oferta gracza {user.mention} wygasła po 6 godzinach bez zainteresowania.",
+                color=discord.Color.dark_grey()
+            )
             try:
-                await offer_message.delete()
-                await announce_message.delete()
+                await original_message.edit(embed=expired, view=None)
             except:
                 pass
             try:
-                await user.send("⌛ Twoja oferta wygasła po 6 godzinach bez zainteresowania.")
+                await user.send("⌛ Twoja oferta wygasła bez odpowiedzi.")
             except:
                 pass
-
 
 # -----------------------------
 # 🔧 Rejestracja rozszerzenia
