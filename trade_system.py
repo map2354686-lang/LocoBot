@@ -16,7 +16,7 @@ class FinalizeTradeView(discord.ui.View):
         self.author = author
         self.partner = partner
         self.announce_message = announce_message
-        self.original_message = original_message  # 🧭│handel wiadomość z ofertą
+        self.original_message = original_message
 
     @discord.ui.button(label="✅ Oferta udana", style=discord.ButtonStyle.green)
     async def success(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -29,9 +29,7 @@ class FinalizeTradeView(discord.ui.View):
         # ✅ Aktualizacja ogłoszenia w 📣│ogłoszenia
         success_embed = discord.Embed(
             title="✅ Oferta zakończona pomyślnie!",
-            description=(
-                f"Wymiana pomiędzy {self.author.mention} a {self.partner.mention} zakończyła się sukcesem 💎"
-            ),
+            description=f"Handel pomiędzy {self.author.mention} a {self.partner.mention} zakończył się sukcesem 💎",
             color=discord.Color.green(),
             timestamp=datetime.utcnow()
         )
@@ -40,12 +38,6 @@ class FinalizeTradeView(discord.ui.View):
         # 🧹 Usuń ogłoszenie z kanału 🧭│handel
         try:
             await self.original_message.delete()
-        except Exception as e:
-            print(f"[WARN] Nie udało się usunąć oferty z kanału 🧭│handel: {e}")
-
-        # 📩 DM do autora
-        try:
-            await self.author.send("✅ Twoja oferta zakończyła się pomyślnie! 💎")
         except:
             pass
 
@@ -60,7 +52,7 @@ class FinalizeTradeView(discord.ui.View):
 
         await interaction.response.send_message("🚫 Handel został anulowany. Kanał zostanie usunięty za 5 sekund.", ephemeral=True)
 
-        # 🔄 Przywraca ofertę do stanu aktywnego w 🧭│handel
+        # 🔄 Przywraca ofertę do stanu aktywnego
         restored_embed = discord.Embed(
             title="📦 Oferta ponownie aktywna",
             description=f"{self.author.mention} ponownie wystawił swoją ofertę do handlu.",
@@ -68,9 +60,9 @@ class FinalizeTradeView(discord.ui.View):
             timestamp=datetime.utcnow()
         )
         try:
-            await self.original_message.edit(embed=restored_embed, view=TradeOfferView(self.cog, self.author))
-        except Exception as e:
-            print(f"[WARN] Nie udało się przywrócić oferty: {e}")
+            await self.original_message.edit(embed=restored_embed, view=TradeOfferView(self.cog, self.author, self.announce_message))
+        except:
+            pass
 
         await asyncio.sleep(5)
         await self.channel.delete()
@@ -111,7 +103,6 @@ class TradeOfferView(discord.ui.View):
         channel_name = f"💸│handel-{self.author.name.lower()}-{interaction.user.name.lower()}"
         trade_channel = await guild.create_text_channel(name=channel_name, overwrites=overwrites)
 
-        # 💬 Wiadomość w kanale handlu
         embed = discord.Embed(
             title="💬 Pokój handlowy",
             description=(
@@ -121,9 +112,8 @@ class TradeOfferView(discord.ui.View):
             ),
             color=discord.Color.green()
         )
-        await trade_channel.send(embed=embed, view=FinalizeTradeView(trade_channel, self.cog, self.author, interaction.user, self.announce_message))
+        await trade_channel.send(embed=embed, view=FinalizeTradeView(trade_channel, self.cog, self.author, interaction.user, self.announce_message, interaction.message))
 
-        # 🔒 Zaktualizuj ofertę w kanale 🧭│handel
         updated_embed = discord.Embed(
             title="🔒 Oferta w trakcie realizacji",
             description=f"Handel pomiędzy {self.author.mention} a {interaction.user.mention} jest w toku!",
@@ -139,7 +129,7 @@ class TradeOfferView(discord.ui.View):
 
         self.active = False
 
-        # Usuń ogłoszenie + ofertę
+        # 🗑️ Usuń ogłoszenie i ofertę
         try:
             if self.announce_message:
                 await self.announce_message.delete()
@@ -150,10 +140,7 @@ class TradeOfferView(discord.ui.View):
         except:
             pass
 
-        try:
-            await interaction.user.send("❌ Twoja oferta została anulowana i usunięta z ogłoszeń.")
-        except:
-            pass
+        await interaction.response.send_message("❌ Twoja oferta została anulowana i usunięta.", ephemeral=True)
 
 
 # -----------------------------
@@ -196,12 +183,9 @@ class TradeSystem(commands.Cog):
             img = await self.bot.wait_for("message", check=check, timeout=60)
             if img.attachments:
                 attachment = img.attachments[0].url
-            elif img.content.lower() == "pomiń":
-                attachment = None
         except asyncio.TimeoutError:
-            attachment = None
+            pass
 
-        # 📦 Tworzymy embed oferty
         offer_embed = discord.Embed(
             title="📦 Nowe ogłoszenie handlowe",
             description=f"**👤 Gracz:** {user.mention}\n\n"
@@ -215,11 +199,9 @@ class TradeSystem(commands.Cog):
         if attachment:
             offer_embed.set_image(url=attachment)
 
-        # 📩 Wysyłamy ofertę do kanału 🧭│handel
         view = TradeOfferView(self, user)
         original_message = await trade_channel.send(embed=offer_embed, view=view)
 
-        # 📣 Wysyłamy ogłoszenie do 📣│ogłoszenia
         announce_embed = discord.Embed(
             title="🛒 Nowa oferta handlowa!",
             description=f"{user.mention} wystawił nową ofertę handlu na kanale {trade_channel.mention}! 💎",
@@ -228,7 +210,6 @@ class TradeSystem(commands.Cog):
         announce_embed.set_footer(text="Czas trwania oferty: 6 godzin ⏳")
         announce_message = await announce_channel.send(embed=announce_embed)
 
-        # 🔗 Przypisz wiadomości do widoku (żeby można było aktualizować/usunąć później)
         view.original_message = original_message
         view.announce_message = announce_message
 
@@ -247,16 +228,14 @@ class TradeSystem(commands.Cog):
                 await original_message.edit(embed=expired, view=None)
             except:
                 pass
-            try:
-                await user.send("⌛ Twoja oferta wygasła bez odpowiedzi.")
-            except:
-                pass
+
 
 # -----------------------------
 # 🔧 Rejestracja rozszerzenia
 # -----------------------------
 async def setup(bot):
     await bot.add_cog(TradeSystem(bot))
+
 
 
 
