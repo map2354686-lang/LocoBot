@@ -245,6 +245,14 @@ class TradeSystem(commands.Cog):
                 pass
 
 
+# -----------------------------
+# 🔧 Rejestracja rozszerzenia
+# -----------------------------
+async def setup(bot):
+    await bot.add_cog(TradeSystem(bot))
+
+
+
 
 
 
