@@ -210,6 +210,24 @@ async def on_member_join(member):
     else:
         print(f"⚠️ Nie znaleziono roli '{role_name}' na serwerze!")
 
+# ---------------------------------
+# 🌐 Fake web server for Render (anti-timeout)
+# ---------------------------------
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "✅ Bot is running and healthy!"
+
+def run_web():
+    app.run(host="0.0.0.0", port=8080)
+
+# Start web server in background thread
+threading.Thread(target=run_web).start()
+
 
 # -----------------------------
 # START BOTA (async)
@@ -220,5 +238,7 @@ async def main():
         await bot.start(TOKEN)
 
 asyncio.run(main())
+
+
 
 

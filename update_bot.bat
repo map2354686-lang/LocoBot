@@ -12,14 +12,14 @@ git push origin main
 :: --- KROK 2: Wywołanie redeploy przez API Render ---
 echo.
 echo 🔁 Wymuszam redeploy na Render...
-curl -X POST "https://api.render.com/v1/services/usr-d3rahnhr0fns73cs2q6g/deploys" ^
+curl -X POST "https://api.render.com/v1/services/srv-d3rb1195pdvs73b521l0" ^
      -H "Accept: application/json" ^
      -H "Authorization: Bearer rnd_UYNacssSNbpGxJDA31E173gruEQz"
 
 :: --- KROK 3: (opcjonalnie) reset cache ---
 echo.
 echo 🧹 Czyszczenie cache na Render... (jeśli włączone)
-curl -X DELETE "https://api.render.com/v1/services/usr-d3rahnhr0fns73cs2q6g/caches" ^
+curl -X DELETE "https://api.render.com/v1/services/srv-d3rb1195pdvs73b521l0" ^
      -H "Accept: application/json" ^
      -H "Authorization: Bearer rnd_UYNacssSNbpGxJDA31E173gruEQz"
 
