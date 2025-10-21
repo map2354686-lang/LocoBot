@@ -6,4 +6,6 @@ aiohttp==3.9.5
 requests==2.31.0
 colorama==0.4.6
 typing-extensions==4.9.0
+flask
+
 
