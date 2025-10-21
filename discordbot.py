@@ -216,6 +216,9 @@ async def on_member_join(member):
 from flask import Flask
 import threading
 import os
+import requests
+import time
+import asyncio
 
 app = Flask(__name__)
 
@@ -224,39 +227,46 @@ def home():
     return "✅ Bot is running and healthy!"
 
 def run_web():
-    port = int(os.environ.get("PORT", 8080))  # ⬅️ Render ustawia zmienną PORT automatycznie
+    port = int(os.environ.get("PORT", 8080))  # Render ustawia PORT automatycznie
     app.run(host="0.0.0.0", port=port)
 
-# Start web server in background thread
+# Start Flask webserver
 threading.Thread(target=run_web).start()
 
-
-
-# -----------------------------
-# START BOTA (async)
-# -----------------------------
-async def main():
-    async with bot:
-        await bot.load_extension("trade_system")  # ⬅️ Ładuje Twój plik handlu
-        await bot.start(TOKEN)
-
-asyncio.run(main())
-
 # ---------------------------------
-# 🔄 Keep Alive (anty usypianie Rendera)
+# 🌀 Self-ping system (keeps Render awake)
 # ---------------------------------
-import threading, time, requests
-
-def keep_alive():
+def keep_alive_ping():
+    url = "https://locobot-whr2.onrender.com"  # ⬅️ Twój link Rendera
     while True:
         try:
-            requests.get("https://locobot-whr2.onrender.com")
-            print("[KeepAlive] Ping poszedł, bot aktywny 🔥")
+            response = requests.get(url)
+            print(f"[PING] Self-ping sent ({response.status_code}) ✅")
         except Exception as e:
-            print(f"[KeepAlive] Błąd pingu: {e}")
-        time.sleep(300)  # co 5 minut
+            print(f"[PING ERROR] {e}")
+        time.sleep(600)  # co 10 minut
 
-threading.Thread(target=keep_alive, daemon=True).start()
+threading.Thread(target=keep_alive_ping, daemon=True).start()
+
+
+# ---------------------------------
+# 🚀 Start bota z auto-reconnectem
+# ---------------------------------
+async def run_bot():
+    while True:
+        try:
+            async with bot:
+                await bot.load_extension("trade_system")
+                await bot.start(TOKEN)
+        except Exception as e:
+            print(f"[BOT ERROR] {e}")
+            print("🔁 Restartuję bota za 10 sekund...")
+            await asyncio.sleep(10)
+
+asyncio.run(run_bot())
+
+
+
 
 
 
