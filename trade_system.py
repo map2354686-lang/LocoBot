@@ -8,6 +8,9 @@ from datetime import datetime
 # -----------------------------
 # 🔰 Widok finalizacji handlu (w prywatnym kanale)
 # -----------------------------
+# -----------------------------
+# 🔰 Widok finalizacji handlu (w prywatnym kanale)
+# -----------------------------
 class FinalizeTradeView(discord.ui.View):
     def __init__(self, channel, cog, author, partner, announce_message, original_message):
         super().__init__(timeout=None)
@@ -16,7 +19,7 @@ class FinalizeTradeView(discord.ui.View):
         self.author = author
         self.partner = partner
         self.announce_message = announce_message
-        self.original_message = original_message
+        self.original_message = original_message  # 🧭│handel wiadomość z ofertą
 
     @discord.ui.button(label="✅ Oferta udana", style=discord.ButtonStyle.green)
     async def success(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -24,25 +27,42 @@ class FinalizeTradeView(discord.ui.View):
             await interaction.response.send_message("❌ Nie możesz tego zrobić.", ephemeral=True)
             return
 
-        await interaction.response.send_message("🎉 Handel zakończony pomyślnie! Kanał zostanie usunięty za 5 sekund.", ephemeral=True)
+        await interaction.response.send_message(
+            "🎉 Handel zakończony pomyślnie! Kanał zostanie usunięty za 5 sekund.",
+            ephemeral=True
+        )
 
         # ✅ Aktualizacja ogłoszenia w 📣│ogłoszenia
         success_embed = discord.Embed(
             title="✅ Oferta zakończona pomyślnie!",
-            description=f"Handel pomiędzy {self.author.mention} a {self.partner.mention} zakończył się sukcesem 💎",
+            description=f"Wymiana pomiędzy {self.author.mention} a {self.partner.mention} zakończyła się sukcesem 💎",
             color=discord.Color.green(),
             timestamp=datetime.utcnow()
         )
-        await self.announce_message.edit(embed=success_embed)
+
+        try:
+            await self.announce_message.edit(embed=success_embed)
+        except Exception as e:
+            print(f"[WARN] Nie udało się zaktualizować ogłoszenia: {e}")
 
         # 🧹 Usuń ogłoszenie z kanału 🧭│handel
         try:
             await self.original_message.delete()
+        except Exception as e:
+            print(f"[WARN] Nie udało się usunąć wiadomości z kanału 🧭│handel: {e}")
+
+        # 📩 DM do autora
+        try:
+            await self.author.send("✅ Twoja oferta zakończyła się pomyślnie! 💎")
         except:
             pass
 
+        # ⏳ Poczekaj i usuń kanał
         await asyncio.sleep(5)
-        await self.channel.delete()
+        try:
+            await self.channel.delete()
+        except Exception as e:
+            print(f"[WARN] Nie udało się usunąć kanału handlu: {e}")
 
     @discord.ui.button(label="❌ Anuluj handel", style=discord.ButtonStyle.red)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -50,22 +70,30 @@ class FinalizeTradeView(discord.ui.View):
             await interaction.response.send_message("❌ Nie możesz anulować tego handlu.", ephemeral=True)
             return
 
-        await interaction.response.send_message("🚫 Handel został anulowany. Kanał zostanie usunięty za 5 sekund.", ephemeral=True)
+        await interaction.response.send_message(
+            "🚫 Handel został anulowany. Kanał zostanie usunięty za 5 sekund.",
+            ephemeral=True
+        )
 
-        # 🔄 Przywraca ofertę do stanu aktywnego
+        # 🔄 Przywraca ofertę do stanu aktywnego w 🧭│handel
         restored_embed = discord.Embed(
             title="📦 Oferta ponownie aktywna",
             description=f"{self.author.mention} ponownie wystawił swoją ofertę do handlu.",
             color=discord.Color.gold(),
             timestamp=datetime.utcnow()
         )
+
         try:
-            await self.original_message.edit(embed=restored_embed, view=TradeOfferView(self.cog, self.author, self.announce_message))
-        except:
-            pass
+            await self.original_message.edit(embed=restored_embed, view=TradeOfferView(self.cog, self.author))
+        except Exception as e:
+            print(f"[WARN] Nie udało się przywrócić oferty: {e}")
 
         await asyncio.sleep(5)
-        await self.channel.delete()
+        try:
+            await self.channel.delete()
+        except Exception as e:
+            print(f"[WARN] Nie udało się usunąć kanału handlu: {e}")
+
 
 
 # -----------------------------
