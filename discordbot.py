@@ -239,6 +239,22 @@ async def main():
 
 asyncio.run(main())
 
+# ---------------------------------
+# 🔄 Keep Alive (anty usypianie Rendera)
+# ---------------------------------
+import threading, time, requests
+
+def keep_alive():
+    while True:
+        try:
+            requests.get("https://locobot-whr2.onrender.com")
+            print("[KeepAlive] Ping poszedł, bot aktywny 🔥")
+        except Exception as e:
+            print(f"[KeepAlive] Błąd pingu: {e}")
+        time.sleep(300)  # co 5 minut
+
+threading.Thread(target=keep_alive, daemon=True).start()
+
 
 
 
